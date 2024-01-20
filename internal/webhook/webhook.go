@@ -2,9 +2,12 @@ package webhook
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"vjudge/pkg/util"
 
 	"github.com/gin-gonic/gin"
@@ -14,6 +17,12 @@ var Secret []byte
 
 // Webhook is the function which gin should call when GitHub accesses it
 func Webhook(c *gin.Context) {
+	if len(os.Args) > 2 {
+		readConfig(os.Args[2])
+	} else {
+		readConfig("config/config-judge.json")
+	}
+
 	event := c.GetHeader("X-GitHub-Event")
 	logger := slog.With(
 		slog.String("id", c.GetHeader("X-GitHub-Delivery")),
@@ -49,8 +58,8 @@ func Webhook(c *gin.Context) {
 		return
 	}
 	// Accept main pushes only
-	if payload.Ref != "refs/heads/main" {
-		logger.With(slog.String("ref", payload.Ref)).Debug("ignored non main ref")
+	if payload.Ref != "refs/heads/main" || payload.Ref != "refs/heads/main" {
+		logger.With(slog.String("ref", payload.Ref)).Debug("ignored non main-master ref")
 		return
 	}
 
@@ -60,6 +69,36 @@ func Webhook(c *gin.Context) {
 		return
 	}
 
-	RunJudgeProcess(payload)
+	homeworkName, err := getHomeworkName(payload.Repository.Name)
+	if err != nil {
+		logger.With(slog.String("name", payload.Ref)).Warn(err.Error())
+		return
+	}
+	homework, ok := getHomework(homeworkName)
+	if !ok {
+		logger.With(slog.String("name", payload.Ref)).Warn("no homework with the given name")
+		return
+	}
+
+	RunJudgeProcess(payload, homeworkName, homework)
 	// Push the job
+}
+
+func getHomeworkName(repositoryName string) (string, error) {
+	firstDashIndex := strings.Index(repositoryName, "-")
+	if firstDashIndex == -1 {
+		return "", errors.New("could not extract homework name")
+	}
+
+	return repositoryName[:firstDashIndex], nil
+}
+
+func getHomework(name string) (*Homework, bool) {
+	for _, homework := range config.Homeworks {
+		if homework.Name == name {
+			return &homework, true
+		}
+	}
+
+	return nil, false
 }

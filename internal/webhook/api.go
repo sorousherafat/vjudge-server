@@ -42,12 +42,7 @@ func CloneRepositoryFromGithub(repoData CloneRepoData) (string, error) {
 	return tmpDir, nil
 }
 
-func RunJudgeProcess(payload githubPayload) {
-	if len(os.Args) > 2 {
-		readConfig(os.Args[2])
-	} else {
-		readConfig("config/config-judge.json")
-	}
+func RunJudgeProcess(payload githubPayload, homeworkName string, homework *Homework) {
 	repoData := &CloneRepoData{
 		RepoUrl:   payload.Repository.Url,
 		OwnerName: payload.Repository.Owner.Name,
@@ -69,13 +64,14 @@ func RunJudgeProcess(payload githubPayload) {
 		log.Fatal(err)
 	}
 
-	judgeResult := judge.JudgeCode(tmpDir+"/src", config.TestDirectory)
-
-	// Write grade.txt file
-	gradeFilePath := filepath.Join(tmpDir, "grade.txt")
-	writeErr := writeGradeFile(judgeResult, gradeFilePath)
-	if writeErr != nil {
-		log.Fatal(err)
+	for _, question := range homework.Questions {
+		judgeResult := judge.JudgeCode(filepath.Join(tmpDir, config.SRCDirectory, question), filepath.Join(config.TestDirectory, homeworkName, question))
+		// Write grade.txt file
+		gradeFilePath := filepath.Join(tmpDir, config.SRCDirectory, question, "grade.txt")
+		writeErr := writeGradeFile(judgeResult, gradeFilePath)
+		if writeErr != nil {
+			log.Fatal(err)
+		}
 	}
 
 	// Commit, push, and cleanup
@@ -93,7 +89,15 @@ func writeGradeFile(judgeResult *judge.JudgeResult, filePath string) error {
 	}
 	defer file.Close()
 
+	loc, _ := time.LoadLocation("Asia/Tehran")
+	now := time.Now().In(loc).Format(time.ANSIC)
+
 	// Write human-friendly data to the file
+	_, err = file.WriteString("Time: " + now + "\n")
+	if err != nil {
+		return err
+	}
+
 	_, err = file.WriteString("Status: " + judgeResult.Status.Message + "\n")
 	if err != nil {
 		return err
@@ -141,7 +145,7 @@ func writeGradeFile(judgeResult *judge.JudgeResult, filePath string) error {
 
 func commitAndPushChanges(repo *git.Repository, worktree *git.Worktree, commitMessage string) error {
 	// Stage all changes (similar to `git add .`)
-	_, err := worktree.Add("grade.txt")
+	_, err := worktree.Add(".")
 	if err != nil {
 		return err
 	}
